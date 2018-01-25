@@ -1,8 +1,26 @@
-
 /*
-Basic Setup 1 - runs faster, but uses more memory
+  Code Development Team
+  DIGF 2005 - Atelier II
+  Professor Nick Puckett
+  Tuesday January 23, 2018
+  NANO COMMUNICATION CODE
+  This code allows Nanos to read information from the serial port sent
+  from the control panel, and display corresponding images/animations on
+  the OLEDs.
+  THE CIRCUIT
+    RX is digital pin 8 (connect to TX of other device)
+    TX is digital pin 9 (connect to RX of other device)
+    SDA connected to A4
+    SCL connected to A5
+    GND connected to GND
+    VCC connected to VTN
+  REFERENCES:
+  https://www.arduino.cc/en/Tutorial/SoftwareSerialExample
+  https://www.arduino.cc/reference/en/language/variables/data-types/bool/
+  http://forum.arduino.cc/index.php?topic=42603.0
 */
 
+// include necessary libraries
 #include <Arduino.h>
 #include <U8g2lib.h>
 
@@ -13,17 +31,13 @@ Basic Setup 1 - runs faster, but uses more memory
 #include <Wire.h>
 #endif
 
-/*
-  U8glib Example Overview:
-    Frame Buffer Examples: clearBuffer/sendBuffer. Fast, but may not work with all Arduino boards because of RAM consumption
-    Page Buffer Examples: firstPage/nextPage. Less RAM usage, should work with all Arduino boards.
-    U8x8 Text Only Example: No RAM usage, direct communication with display controller. No graphics, 8x8 Text only.
-    
-*/
+#include <SoftwareSerial.h> // * NEW
+SoftwareSerial mySerial(8, 9); // RX, TX // * NEW
 
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
-// BITMAP FOR HAPPY FRAME 1
+////////// STORING THE XBITMAPS (.xbm opened in a text editor)
+// XBITMAP FOR HAPPY FRAME 1
 #define hframe001_width 128
 #define hframe001_height 64
 static const unsigned char hframe001_bits[] PROGMEM = {
@@ -114,7 +128,7 @@ static const unsigned char hframe001_bits[] PROGMEM = {
    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
    0x00, 0x00, 0x00, 0x00 };
 
-// BITMAP FOR HAPPY FRAME 2
+// XBITMAP FOR HAPPY FRAME 2
 #define hframe002_width 128
 #define hframe002_height 64
 static const unsigned char hframe002_bits[] PROGMEM = {
@@ -205,7 +219,7 @@ static const unsigned char hframe002_bits[] PROGMEM = {
    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
    0x00, 0x00, 0x00, 0x00 };
 
-// BITMAP FOR HAPPY FRAME 3
+// XBITMAP FOR HAPPY FRAME 3
 #define hframe003_width 128
 #define hframe003_height 64
 static const unsigned char hframe003_bits[] PROGMEM = {
@@ -296,7 +310,7 @@ static const unsigned char hframe003_bits[] PROGMEM = {
    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
    0x00, 0x00, 0x00, 0x00 };
 
-// BITMAP FOR SAD FRAME 1
+// XBITMAP FOR SAD FRAME 1
 #define sframe001_width 128
 #define sframe001_height 64
 static const unsigned char sframe001_bits[] PROGMEM = {
@@ -387,7 +401,7 @@ static const unsigned char sframe001_bits[] PROGMEM = {
    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
    0x00, 0x00, 0x00, 0x00 };
 
-// BITMAP FOR SAD FRAME 2
+// XBITMAP FOR SAD FRAME 2
 #define sframe002_width 128
 #define sframe002_height 64
 static const unsigned char sframe002_bits[] PROGMEM = {
@@ -478,7 +492,7 @@ static const unsigned char sframe002_bits[] PROGMEM = {
    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
    0x00, 0x00, 0x00, 0x00 };
 
-// BITMAP FOR SAD FRAME 2
+// XBITMAP FOR SAD FRAME 3
 #define sframe003_width 128
 #define sframe003_height 64
 static const unsigned char sframe003_bits[] PROGMEM = {
@@ -568,11 +582,16 @@ static const unsigned char sframe003_bits[] PROGMEM = {
    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
    0x00, 0x00, 0x00, 0x00 };
-
+////////// END OF XBITMAP (.xbm opened in a text editor) STORAGE
 
 //// GLOBAL VARIABLES
 const int framesPerSecond = 3;
-int petStatus = 0; // 0=HAPPY, 1=SAD
+int incoming;
+
+// *** PICK THE ENVIRONMENT YOUR CREATURE LIVES IN ***
+// 1 = Desert, 2 = Forest, 3 = Water
+int environment = 1;
+int petStatus = 0; // 0=HAPPY, 1=SAD // CHANGE THIS VALUE TO SWITCH BETWEEN VIEWING HAPPY/SAD ANIMATION
 ////
 
 
@@ -606,9 +625,33 @@ void sadFrame3(void) {  //THE THIRD FRAME OF THE 'SAD' ANIMATION
 void setup(void) {
   u8g2.begin();
   u8g2.setFont(u8g2_font_ncenB14_tr);
+
+  // set pins for OLED
+  pinMode(4, INPUT);
+  pinMode(5, INPUT);
+  pinMode(6, INPUT);
+  u8g2.begin(4, 5, 6);
+
+  mySerial.begin(4800);
+  mySerial.flush();
+
+  Serial.begin(57600);
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
 }
 
 void loop(void) {
+  // Determines pet status before animations are executed
+  if (mySerial.available()) {
+    incoming = mySerial.read();
+    Serial.println(incoming);
+    if (incoming == environment) {
+      petStatus = 0;
+    } else {
+      petStatus = 1;
+    }
+  }
   animateScreen();
 }
 
@@ -619,43 +662,42 @@ void animateScreen() {
     u8g2.clearBuffer();
     happyFrame1();
     u8g2.sendBuffer();
-    delay(1000/framesPerSecond);
+    delay(1000 / framesPerSecond);
 
     u8g2.clearBuffer();
     happyFrame2();
     u8g2.sendBuffer();
-    delay(1000/framesPerSecond);
+    delay(1000 / framesPerSecond);
 
     u8g2.clearBuffer();
     happyFrame3();
     u8g2.sendBuffer();
-    delay(1000/framesPerSecond);
+    delay(1000 / framesPerSecond);
 
     u8g2.clearBuffer();
     happyFrame2();
     u8g2.sendBuffer();
-    delay(1000/framesPerSecond);
-  }  
+    delay(1000 / framesPerSecond);
+  }
   else { //IF PET IS NOT HAPPY, IT'S SAD. DO THIS CODE:
     u8g2.clearBuffer();
     sadFrame1();
     u8g2.sendBuffer();
-    delay(1000/framesPerSecond);
+    delay(1000 / framesPerSecond);
 
     u8g2.clearBuffer();
     sadFrame2();
     u8g2.sendBuffer();
-    delay(1000/framesPerSecond);
+    delay(1000 / framesPerSecond);
 
     u8g2.clearBuffer();
     sadFrame3();
     u8g2.sendBuffer();
-    delay(1000/framesPerSecond);
+    delay(1000 / framesPerSecond);
 
     u8g2.clearBuffer();
     sadFrame2();
     u8g2.sendBuffer();
-    delay(1000/framesPerSecond);
-}
+    delay(1000 / framesPerSecond);
   }
-
+}
